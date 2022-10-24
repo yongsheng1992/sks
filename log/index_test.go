@@ -14,7 +14,9 @@ func TestIndex(t *testing.T) {
 		_ = os.Remove(name)
 	}(f.Name())
 
-	idx, err := newIndex(f)
+	config := Config{}
+	config.Segment.MaxIndexBytes = 1024
+	idx, err := newIndex(f, config)
 	require.NoError(t, err)
 	_, _, err = idx.Read(-1)
 	require.Error(t, err)
@@ -46,7 +48,7 @@ func TestIndex(t *testing.T) {
 	require.NoError(t, err)
 
 	f, err = os.OpenFile(f.Name(), os.O_RDWR, 0600)
-	idx, err = newIndex(f)
+	idx, err = newIndex(f, config)
 	require.NoError(t, err)
 
 	out, pos, err := idx.Read(-1)

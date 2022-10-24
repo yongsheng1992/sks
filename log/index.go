@@ -6,23 +6,23 @@ import (
 	"syscall"
 )
 
+// offset 索引小标
+// pos 对于在store文件中的位置
 var (
 	offWidth uint64 = 4
 	posWidth uint64 = 8
 	entWidth        = offWidth + posWidth
-
-	defaultMemMapSize = 128 * (1 << 20) // 128M
 )
 
 type index struct {
-	file *os.File
+	*os.File
 	mmap []byte
 	size uint64
 }
 
-func newIndex(file *os.File) (*index, error) {
+func newIndex(file *os.File, c Config) (*index, error) {
 	index := &index{
-		file: file,
+		File: file,
 	}
 
 	fi, err := file.Stat()
@@ -31,14 +31,15 @@ func newIndex(file *os.File) (*index, error) {
 	}
 	index.size = uint64(fi.Size())
 
-	if err := os.Truncate(file.Name(), int64(defaultMemMapSize)); err != nil {
+	if err := os.Truncate(file.Name(), int64(c.Segment.MaxIndexBytes)); err != nil {
 		return nil, err
 	}
 
-	b, err := syscall.Mmap(int(file.Fd()), 0, defaultMemMapSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	b, err := syscall.Mmap(int(file.Fd()), 0, int(c.Segment.MaxIndexBytes), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
 	if err != nil {
 		return nil, err
 	}
+
 	index.mmap = b
 	return index, nil
 }
@@ -49,15 +50,15 @@ func (i *index) Close() error {
 		return err
 	}
 
-	if err := i.file.Sync(); err != nil {
+	if err := i.File.Sync(); err != nil {
 		return err
 	}
 
-	if err := i.file.Truncate(int64(i.size)); err != nil {
+	if err := i.File.Truncate(int64(i.size)); err != nil {
 		return err
 	}
 
-	return i.file.Close()
+	return i.File.Close()
 }
 
 // 给定索引，获取索引对应的偏移量

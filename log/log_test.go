@@ -44,8 +44,10 @@ func testLogAppend(t *testing.T, log *Log) {
 
 func testOutOfRangeErr(t *testing.T, log *Log) {
 	record, err := log.Read(1)
+	apiErr := err.(log_v1.ErrOffsetOutOfRange)
 	require.Error(t, err)
 	require.Nil(t, record)
+	require.Equal(t, uint64(1), apiErr.Offset)
 }
 
 func testInitWithExistingSegment(t *testing.T, log *Log) {

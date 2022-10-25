@@ -1,7 +1,6 @@
 package log
 
 import (
-	"fmt"
 	log_v1 "github.com/yongsheng1992/sks/api/v1"
 	"io"
 	"io/ioutil"
@@ -123,7 +122,7 @@ func (l *Log) Read(off uint64) (*log_v1.Record, error) {
 	}
 
 	if seg == nil {
-		return nil, fmt.Errorf("offset out of range: %d", off)
+		return nil, log_v1.ErrOffsetOutOfRange{Offset: off}
 	}
 	return seg.Read(off)
 }

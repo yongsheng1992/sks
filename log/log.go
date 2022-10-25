@@ -116,7 +116,7 @@ func (l *Log) Read(off uint64) (*log_v1.Record, error) {
 
 	// todo use binary search improve performance
 	for _, segment := range l.segments {
-		if off >= seg.baseOffset && off < seg.nextOffset {
+		if off >= segment.baseOffset && off < segment.nextOffset {
 			seg = segment
 			break
 		}
@@ -157,29 +157,35 @@ func (l *Log) Reset() error {
 
 func (l *Log) LowestOffset() uint64 {
 	l.mu.RLock()
-	defer l.mu.Unlock()
+	defer l.mu.RUnlock()
 	return l.segments[0].baseOffset
 }
 
 func (l *Log) HighestOffset() uint64 {
 	l.mu.RLock()
-	defer l.mu.Unlock()
-	return l.activeSegment.nextOffset
+	defer l.mu.RUnlock()
+	off := l.activeSegment.nextOffset
+	if off == 0 {
+		return 0
+	}
+	return off - 1
 }
 
 func (l *Log) Truncate(lowest uint64) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	for i, segment := range l.segments {
-		if lowest > segment.nextOffset-1 {
-			l.segments = l.segments[i:]
+	var i int
+	var segment *segment
+	for i, segment = range l.segments {
+		if lowest < segment.nextOffset-1 {
 			break
 		}
 		if err := segment.Remove(); err != nil {
 			return err
 		}
 	}
+	l.segments = l.segments[i:]
 	return nil
 }
 
@@ -191,7 +197,7 @@ type originReader struct {
 func (o *originReader) Read(p []byte) (int, error) {
 	n, err := o.ReadAt(p, o.off)
 	o.off += int64(n)
-	return 0, err
+	return n, err
 }
 
 func (l *Log) Reader() io.Reader {

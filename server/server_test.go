@@ -1,17 +1,19 @@
 package server
 
 import (
+	"context"
 	"github.com/stretchr/testify/require"
-	log_v1 "github.com/yongsheng1992/sks/api/v1"
+	logv1 "github.com/yongsheng1992/sks/api/v1"
 	"github.com/yongsheng1992/sks/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 	"io/ioutil"
 	"net"
 	"testing"
 )
 
 func TestServer(t *testing.T) {
-	for scenario, fn := range map[string]func(t *testing.T, client log_v1.LogClient, cfg *Config){
+	for scenario, fn := range map[string]func(t *testing.T, client logv1.LogClient, cfg *Config){
 		"produce/consume a message to/form the log succeeds": testProduceAndConsume,
 		"produce/consume stream succeeds":                    testProduceAndConsumeStream,
 		"consume past log boundary fails":                    testPastLogBoundaryFail,
@@ -24,7 +26,7 @@ func TestServer(t *testing.T) {
 	}
 }
 
-func setupTest(t *testing.T, fn func(config *Config)) (client log_v1.LogClient, cfg *Config, teardown func()) {
+func setupTest(t *testing.T, fn func(config *Config)) (client logv1.LogClient, cfg *Config, teardown func()) {
 	t.Helper()
 
 	l, err := net.Listen("tcp", ":0")
@@ -59,7 +61,7 @@ func setupTest(t *testing.T, fn func(config *Config)) (client log_v1.LogClient, 
 		_ = server.Serve(l)
 	}()
 
-	client = log_v1.NewLogClient(cc)
+	client = logv1.NewLogClient(cc)
 
 	return client, cfg, func() {
 		server.Stop()
@@ -69,14 +71,88 @@ func setupTest(t *testing.T, fn func(config *Config)) (client log_v1.LogClient, 
 	}
 }
 
-func testProduceAndConsume(t *testing.T, client log_v1.LogClient, cfg *Config) {
+func testProduceAndConsume(t *testing.T, client logv1.LogClient, cfg *Config) {
+	ctx := context.Background()
 
+	req := &logv1.ProduceRequest{
+		Record: &logv1.Record{
+			Value: []byte("hello world"),
+		},
+	}
+	res, err := client.Produce(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), res.Offset)
+
+	req1 := &logv1.ConsumeRequest{
+		Offset: res.Offset,
+	}
+
+	res1, err := client.Consume(ctx, req1)
+	require.NoError(t, err)
+	require.Equal(t, req.Record.Value, res1.Record.Value)
+	require.Equal(t, uint64(0), res1.Record.Offset)
 }
 
-func testProduceAndConsumeStream(t *testing.T, client log_v1.LogClient, cfg *Config) {
+func testProduceAndConsumeStream(t *testing.T, client logv1.LogClient, cfg *Config) {
+	ctx := context.Background()
+	records := []*logv1.Record{
+		{
+			Value:  []byte("first message"),
+			Offset: 0,
+		},
+		{
+			Value:  []byte("second message"),
+			Offset: 1,
+		},
+	}
 
+	stream, err := client.ProduceStream(ctx)
+	require.NoError(t, err)
+
+	{
+		for _, record := range records {
+			err := stream.Send(&logv1.ProduceRequest{Record: record})
+			require.NoError(t, err)
+
+			res, err := stream.Recv()
+			require.NoError(t, err)
+
+			require.Equal(t, record.Offset, res.Offset)
+		}
+	}
+	{
+		stream, err := client.ConsumeStream(ctx, &logv1.ConsumeRequest{Offset: 0})
+		require.NoError(t, err)
+
+		for _, record := range records {
+			res, err := stream.Recv()
+			require.NoError(t, err)
+			require.Equal(t, record.Offset, res.Record.Offset)
+			require.Equal(t, record.Value, res.Record.Value)
+			require.Equal(t, res.Record, &logv1.Record{
+				Value:  record.Value,
+				Offset: record.Offset,
+			})
+		}
+	}
 }
 
-func testPastLogBoundaryFail(t *testing.T, client log_v1.LogClient, cfg *Config) {
+func testPastLogBoundaryFail(t *testing.T, client logv1.LogClient, cfg *Config) {
+	ctx := context.Background()
+	msg := "hello world"
+	produce, err := client.Produce(ctx, &logv1.ProduceRequest{
+		Record: &logv1.Record{
+			Value: []byte(msg),
+		},
+	})
 
+	require.NoError(t, err)
+
+	consume, err := client.Consume(ctx, &logv1.ConsumeRequest{Offset: produce.Offset + 1})
+	require.Error(t, err)
+	require.Nil(t, consume)
+
+	got := status.Code(err)
+	want := status.Code(logv1.ErrOffsetOutOfRange{}.GRPCStatus().Err())
+	require.Equal(t, got, want)
 }

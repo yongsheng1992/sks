@@ -4,8 +4,10 @@ import (
 	"context"
 	"github.com/stretchr/testify/require"
 	logv1 "github.com/yongsheng1992/sks/api/v1"
+	"github.com/yongsheng1992/sks/config"
 	"github.com/yongsheng1992/sks/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 	"io/ioutil"
 	"net"
@@ -26,14 +28,44 @@ func TestServer(t *testing.T) {
 	}
 }
 
-func setupTest(t *testing.T, fn func(config *Config)) (client logv1.LogClient, cfg *Config, teardown func()) {
+func setupClientTLS(t *testing.T, addr string) (*grpc.ClientConn, logv1.LogClient) {
 	t.Helper()
+	tlsConfig, err := config.SetupTLSConfig(config.TLSConfig{
+		CAFile:   config.CAFile,
+		CertFile: config.ClientCertFile,
+		KeyFile:  config.ClientKeyFile,
+		Server:   false,
+		//ServerAddr: addr,
+	})
 
-	l, err := net.Listen("tcp", ":0")
+	require.NoError(t, err)
+	creds := credentials.NewTLS(tlsConfig)
+	opts := []grpc.DialOption{grpc.WithTransportCredentials(creds)}
+	cc, err := grpc.Dial(addr, opts...)
 	require.NoError(t, err)
 
-	clientOpts := []grpc.DialOption{grpc.WithInsecure()}
-	cc, err := grpc.Dial(l.Addr().String(), clientOpts...)
+	client := logv1.NewLogClient(cc)
+	return cc, client
+}
+
+func setupServerTLSOptions(t *testing.T, addr string) grpc.ServerOption {
+	t.Helper()
+	tlsConfig, err := config.SetupTLSConfig(config.TLSConfig{
+		CAFile:     config.CAFile,
+		CertFile:   config.ServerCertFile,
+		KeyFile:    config.ServerKeyFile,
+		Server:     true,
+		ServerAddr: addr,
+	})
+	require.NoError(t, err)
+
+	creds := credentials.NewTLS(tlsConfig)
+	return grpc.Creds(creds)
+}
+
+func setupTest(t *testing.T, fn func(config *Config)) (client logv1.LogClient, cfg *Config, teardown func()) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
 	dir, err := ioutil.TempDir("", "server-test")
@@ -55,13 +87,14 @@ func setupTest(t *testing.T, fn func(config *Config)) (client logv1.LogClient, c
 		fn(cfg)
 	}
 
-	server, err := NewGRPCServer(cfg)
+	tlsOption := setupServerTLSOptions(t, "127.0.0.1")
+	server, err := NewGRPCServer(cfg, tlsOption)
 	require.NoError(t, err)
 	go func() {
 		_ = server.Serve(l)
 	}()
 
-	client = logv1.NewLogClient(cc)
+	cc, client := setupClientTLS(t, l.Addr().String())
 
 	return client, cfg, func() {
 		server.Stop()

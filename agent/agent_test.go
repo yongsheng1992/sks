@@ -43,7 +43,6 @@ func TestAgent(t *testing.T) {
 	var agents []*Agent
 	for i := 0; i < 3; i++ {
 		bindAddr := fmt.Sprintf("%s:%d", Addr, port)
-		fmt.Println(i, bindAddr)
 		port++
 		rpcPort := port
 		port++

@@ -4,6 +4,7 @@ import (
 	"context"
 	logv1 "github.com/yongsheng1992/sks/api/v1"
 	"google.golang.org/grpc"
+	"math"
 	"sync"
 )
 
@@ -14,6 +15,8 @@ type Replicator struct {
 	Servers     map[string]chan struct{}
 	closed      bool
 	close       chan struct{}
+
+	Offset uint64
 }
 
 func (r *Replicator) init() {
@@ -23,6 +26,7 @@ func (r *Replicator) init() {
 	if r.Servers == nil {
 		r.Servers = make(map[string]chan struct{})
 	}
+	r.Offset = math.MaxUint64
 }
 
 func (r *Replicator) Join(name, addr string) error {
@@ -38,7 +42,7 @@ func (r *Replicator) Join(name, addr string) error {
 		return nil
 	}
 	r.Servers[name] = make(chan struct{})
-	go r.replicate(name, r.Servers[name])
+	go r.replicate(addr, r.Servers[name])
 	return nil
 }
 
@@ -48,6 +52,12 @@ func (r *Replicator) replicate(addr string, leave chan struct{}) {
 	if err != nil {
 		return
 	}
+	defer func(cc *grpc.ClientConn) {
+		err := cc.Close()
+		if err != nil {
+
+		}
+	}(cc)
 
 	client := logv1.NewLogClient(cc)
 
@@ -77,7 +87,7 @@ func (r *Replicator) replicate(addr string, leave chan struct{}) {
 		case <-leave:
 			return
 		case record := <-records:
-			_, err = r.LocalServer.Produce(ctx, &logv1.ProduceRequest{Record: record})
+			err := r.apply(ctx, record)
 			if err != nil {
 				return
 			}
@@ -109,5 +119,19 @@ func (r *Replicator) Close() error {
 	}
 	r.closed = true
 	close(r.close)
+	return nil
+}
+
+func (r *Replicator) apply(ctx context.Context, record *logv1.Record) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.Offset == math.MaxUint64 || record.Offset > r.Offset {
+		resp, err := r.LocalServer.Produce(ctx, &logv1.ProduceRequest{Record: record})
+		if err != nil {
+			return err
+		}
+		r.Offset = resp.Offset
+	}
 	return nil
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	log_v1 "github.com/yongsheng1992/sks/api/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type CommitLog interface {
@@ -94,4 +96,8 @@ func (srv *grpcServer) ConsumeStream(req *log_v1.ConsumeRequest, stream log_v1.L
 			req.Offset++
 		}
 	}
+}
+
+func (srv *grpcServer) GetServers(ctx context.Context, req *log_v1.GetServersRequest) (*log_v1.GetServersResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetServers not implemented")
 }

@@ -8,11 +8,11 @@ import (
 )
 
 var (
-	byteOrder = binary.BigEndian
+	ByteOrder = binary.BigEndian
 )
 
 const (
-	lenWidth = 8
+	LenWidth = 8
 )
 
 type store struct {
@@ -42,7 +42,7 @@ func (s *store) Append(p []byte) (n uint64, pos uint64, err error) {
 	defer s.mu.Unlock()
 
 	pos = s.size
-	if err := binary.Write(s.buf, byteOrder, uint64(len(p))); err != nil {
+	if err := binary.Write(s.buf, ByteOrder, uint64(len(p))); err != nil {
 		return 0, 0, err
 	}
 
@@ -51,7 +51,7 @@ func (s *store) Append(p []byte) (n uint64, pos uint64, err error) {
 		return 0, 0, err
 	}
 
-	w += lenWidth
+	w += LenWidth
 	s.size += uint64(w)
 
 	return uint64(w), pos, nil
@@ -65,12 +65,12 @@ func (s *store) Read(pos uint64) ([]byte, error) {
 		return nil, err
 	}
 
-	size := make([]byte, lenWidth)
+	size := make([]byte, LenWidth)
 	if _, err := s.File.ReadAt(size, int64(pos)); err != nil {
 		return nil, err
 	}
-	b := make([]byte, byteOrder.Uint64(size))
-	if _, err := s.File.ReadAt(b, int64(pos+lenWidth)); err != nil {
+	b := make([]byte, ByteOrder.Uint64(size))
+	if _, err := s.File.ReadAt(b, int64(pos+LenWidth)); err != nil {
 		return nil, err
 	}
 	return b, nil

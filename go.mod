@@ -13,7 +13,8 @@ require (
 )
 
 require (
-	github.com/armon/go-metrics v0.0.0-20190430140413-ec5e00d3c878 // indirect
+	github.com/armon/go-metrics v0.3.8 // indirect
+	github.com/boltdb/bolt v1.3.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/btree v1.0.1 // indirect
 	github.com/hashicorp/errwrap v1.0.0 // indirect
@@ -24,6 +25,7 @@ require (
 	github.com/hashicorp/go-sockaddr v1.0.0 // indirect
 	github.com/hashicorp/golang-lru v0.5.1 // indirect
 	github.com/hashicorp/memberlist v0.5.0 // indirect
+	github.com/hashicorp/raft-boltdb v0.0.0-20220329195025-15018e9b97e0 // indirect
 	github.com/kr/pretty v0.2.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/miekg/dns v1.1.41 // indirect

@@ -9,7 +9,7 @@ import (
 
 var (
 	write = []byte("hello world")
-	width = uint64(len(write)) + lenWidth
+	width = uint64(len(write)) + LenWidth
 )
 
 func TestStoreAppendRead(t *testing.T) {
@@ -57,13 +57,13 @@ func testRead(t *testing.T, s *store) {
 func testReadAt(t *testing.T, s *store) {
 	t.Helper()
 	for i, off := uint64(1), int64(0); i < 4; i++ {
-		b := make([]byte, lenWidth)
+		b := make([]byte, LenWidth)
 		n, err := s.ReadAt(b, off)
 		require.NoError(t, err)
-		require.Equal(t, n, lenWidth)
+		require.Equal(t, n, LenWidth)
 		off += int64(n)
 
-		size := byteOrder.Uint64(b)
+		size := ByteOrder.Uint64(b)
 		b = make([]byte, size)
 		n, err = s.ReadAt(b, off)
 		require.NoError(t, err)

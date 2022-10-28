@@ -1,4 +1,4 @@
-package log
+package distributed_log
 
 import (
 	"github.com/hashicorp/raft"

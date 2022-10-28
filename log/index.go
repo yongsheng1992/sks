@@ -77,8 +77,8 @@ func (i *index) Read(in int64) (out uint32, pos uint64, err error) {
 	if i.size < pos+entWidth {
 		return 0, 0, io.EOF
 	}
-	out = byteOrder.Uint32(i.mmap[pos : pos+offWidth])
-	pos = byteOrder.Uint64(i.mmap[pos+offWidth : pos+entWidth])
+	out = ByteOrder.Uint32(i.mmap[pos : pos+offWidth])
+	pos = ByteOrder.Uint64(i.mmap[pos+offWidth : pos+entWidth])
 	return out, pos, nil
 }
 
@@ -86,8 +86,8 @@ func (i *index) Write(off uint32, pos uint64) error {
 	if uint64(len(i.mmap)) < i.size+entWidth {
 		return io.EOF
 	}
-	byteOrder.PutUint32(i.mmap[i.size:i.size+offWidth], off)
-	byteOrder.PutUint64(i.mmap[i.size+offWidth:i.size+entWidth], pos)
+	ByteOrder.PutUint32(i.mmap[i.size:i.size+offWidth], off)
+	ByteOrder.PutUint64(i.mmap[i.size+offWidth:i.size+entWidth], pos)
 	i.size += entWidth
 
 	return nil

@@ -1,10 +1,11 @@
-package log
+package distributed_log
 
 import (
 	"bytes"
 	"github.com/golang/protobuf/proto"
 	"github.com/hashicorp/raft"
 	log_v1 "github.com/yongsheng1992/sks/api/v1"
+	log "github.com/yongsheng1992/sks/log"
 	"io"
 )
 
@@ -19,7 +20,11 @@ var _ raft.FSM = (*fsm)(nil)
 var _ raft.FSM = (*fsm)(nil)
 
 type fsm struct {
-	log *Log
+	log *log.Log
+}
+
+func newFsm(l *log.Log) *fsm {
+	return &fsm{log: l}
 }
 
 func (m *fsm) Apply(log *raft.Log) interface{} {
@@ -53,7 +58,7 @@ func (m *fsm) Snapshot() (raft.FSMSnapshot, error) {
 }
 
 func (m *fsm) Restore(snapshot io.ReadCloser) error {
-	b := make([]byte, lenWidth)
+	b := make([]byte, log.LenWidth)
 	var buf bytes.Buffer
 	for i := 0; ; i++ {
 		// read length of a record value
@@ -66,7 +71,7 @@ func (m *fsm) Restore(snapshot io.ReadCloser) error {
 		}
 
 		// read value of a record
-		size := int64(byteOrder.Uint64(b))
+		size := int64(log.ByteOrder.Uint64(b))
 		if _, err := io.CopyN(&buf, snapshot, size); err != nil {
 			return err
 		}

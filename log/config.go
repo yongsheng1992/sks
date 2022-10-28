@@ -1,11 +1,14 @@
 package log
 
-import "github.com/hashicorp/raft"
+import (
+	"github.com/hashicorp/raft"
+	"github.com/yongsheng1992/sks/distributed_log"
+)
 
 type Config struct {
-	Rafts struct {
+	Raft struct {
 		raft.Config
-		SteamLayer *StreamLayer
+		SteamLayer *distributed_log.StreamLayer
 		Bootstrap  bool
 	}
 	Segment struct {

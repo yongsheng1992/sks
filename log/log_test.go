@@ -83,7 +83,7 @@ func testReader(t *testing.T, log *Log) {
 	reader := log.Reader()
 	b, err := ioutil.ReadAll(reader)
 	readRecord := log_v1.Record{}
-	err = proto.Unmarshal(b[lenWidth:], &readRecord)
+	err = proto.Unmarshal(b[LenWidth:], &readRecord)
 	require.NoError(t, err)
 	require.Equal(t, record.Value, readRecord.Value)
 }

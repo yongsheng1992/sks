@@ -120,3 +120,8 @@ func (dl *DistributedLog) Close() error {
 	}
 	return dl.log.Close()
 }
+
+func (dl *DistributedLog) Leave(id string) error {
+	future := dl.raft.RemoveServer(raft.ServerID(id), 0, 0)
+	return future.Error()
+}

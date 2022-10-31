@@ -17,7 +17,7 @@
 Raft的工作就是保证日志（只能追加写的文件）在大多数副本中保证一致。这里的日志可以看做是RSM的操作记录，通过重新执行日志即可构建状态一致的RSM。
 在实际应用中，需要解决日志执行时间过长和占用存储空间的问题。所以会在指定时间，对当前的RSM做一次快照，快照只是关系状态，远比日志文件要小，这样可以加快RSM的构建，新副本加入集群的时候也会加快。
 
-[hashicorp/raft](https://github.com/hashicorp/raft)创建Raft节点的方法：
+[hashicorp/raft](https://github.com/hashicorp/raft) 创建Raft节点的方法：
 ```go
 package raft
 
@@ -33,4 +33,10 @@ func NewRaft(
 	return nil, nil
 }
 ```
+
+`FSM`的具体实现比较灵活，它是一个在内存的对象，可以是map、tree等类型的。`FSM`和`SnapshotStore`是强相关的。
+
+# Debug
+
+raft下标是从1开始的。注意`log.Config.InitialOffset`配置。
 

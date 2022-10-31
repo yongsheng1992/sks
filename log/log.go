@@ -121,6 +121,7 @@ func (l *Log) Read(off uint64) (*log_v1.Record, error) {
 		}
 	}
 
+	// todo compare off with nextOffset
 	if seg == nil {
 		return nil, log_v1.ErrOffsetOutOfRange{Offset: off}
 	}

@@ -60,6 +60,8 @@ func TestAgent(t *testing.T) {
 			StartJoinAddrs:  startJoinAddrs,
 			BindAddr:        bindAddr,
 			RPCPort:         rpcPort,
+			Bootstrap:       i == 0,
+			RaftPort:        rpcPort + 10,
 			DataDir:         dataDir,
 			ServerTLSConfig: serverTLSConfig,
 			PeerTLSConfig:   peerTLSConfig,

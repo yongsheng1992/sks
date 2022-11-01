@@ -3,24 +3,26 @@ package agent
 import (
 	"crypto/tls"
 	"fmt"
-	logv1 "github.com/yongsheng1992/sks/api/v1"
+	"github.com/hashicorp/raft"
 	"github.com/yongsheng1992/sks/discovery"
-	"github.com/yongsheng1992/sks/log"
+	"github.com/yongsheng1992/sks/distributed_log"
 	"github.com/yongsheng1992/sks/server"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"net"
 	"sync"
+	"time"
 )
 
 type Config struct {
 	ServerTLSConfig *tls.Config
 	PeerTLSConfig   *tls.Config
 	DataDir         string
-
+	Bootstrap       bool
 	// BindAddr used for serf
 	BindAddr       string
 	RPCPort        int
+	RaftPort       int
 	NodeName       string
 	StartJoinAddrs []string
 }
@@ -28,22 +30,34 @@ type Config struct {
 type Agent struct {
 	Config
 
-	log        *log.Log
+	log        *distributed_log.DistributedLog
 	server     *grpc.Server
 	membership *discovery.Membership
-	replicator *log.Replicator
 
 	shutdown     bool
 	shutdowns    chan struct{}
 	shutdownLock sync.Mutex
 }
 
-func (c Config) RPCAddr() (string, error) {
+func (c Config) Host() (string, error) {
 	host, _, err := net.SplitHostPort(c.BindAddr)
+	return host, err
+}
+
+func (c Config) RPCAddr() (string, error) {
+	host, err := c.Host()
 	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("%s:%d", host, c.RPCPort), nil
+}
+
+func (c Config) RaftAddr() (string, error) {
+	host, err := c.Host()
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%s:%d", host, c.RaftPort), nil
 }
 
 func New(config Config) (*Agent, error) {
@@ -68,8 +82,38 @@ func New(config Config) (*Agent, error) {
 
 func (agent *Agent) setupLog() error {
 	var err error
-	agent.log, err = log.NewLog(agent.DataDir, log.Config{})
-	return err
+	raftAddr, err := agent.RaftAddr()
+	if err != nil {
+		return err
+	}
+
+	ln, err := net.Listen("tcp", raftAddr)
+	if err != nil {
+		return nil
+	}
+
+	logConfig := distributed_log.Config{}
+	logConfig.Raft.SteamLayer = distributed_log.NewStreamLayer(ln, agent.ServerTLSConfig, agent.PeerTLSConfig)
+	logConfig.Raft.LocalID = raft.ServerID(agent.NodeName)
+	logConfig.Raft.Bootstrap = agent.Config.Bootstrap
+	logConfig.Raft.HeartbeatTimeout = 50 * time.Millisecond
+	logConfig.Raft.ElectionTimeout = 50 * time.Millisecond
+	logConfig.Raft.LeaderLeaseTimeout = 50 * time.Millisecond
+	logConfig.Raft.CommitTimeout = 5 * time.Millisecond
+	logConfig.Raft.ProtocolVersion = raft.ProtocolVersionMax
+	logConfig.Raft.MaxAppendEntries = 20
+	logConfig.Raft.SnapshotInterval = 10 * time.Second
+
+	agent.log, err = distributed_log.NewDistributedLog(agent.DataDir, logConfig)
+	if err != nil {
+		return err
+	}
+
+	if agent.Config.Bootstrap {
+		return agent.log.WaitForLeader(3 * time.Second)
+	}
+
+	return nil
 }
 
 func (agent *Agent) setupServer() error {
@@ -102,32 +146,16 @@ func (agent *Agent) setupServer() error {
 }
 
 func (agent *Agent) setupMembership() error {
-	rpcAddr, err := agent.RPCAddr()
+	raftAddr, err := agent.RaftAddr()
 	if err != nil {
 		return err
 	}
 
-	var opts []grpc.DialOption
-	if agent.PeerTLSConfig != nil {
-		crds := credentials.NewTLS(agent.PeerTLSConfig)
-		opts = append(opts, grpc.WithTransportCredentials(crds))
-	}
-
-	conn, err := grpc.Dial(rpcAddr, opts...)
-	if err != nil {
-		return err
-	}
-
-	client := logv1.NewLogClient(conn)
-	agent.replicator = &log.Replicator{
-		DialOptions: opts,
-		LocalServer: client,
-	}
-	agent.membership, err = discovery.New(agent.replicator, discovery.Config{
+	agent.membership, err = discovery.New(agent.log, discovery.Config{
 		NodeName: agent.NodeName,
 		BindAddr: agent.BindAddr,
 		Tags: map[string]string{
-			"rpc_addr": rpcAddr,
+			"rpc_addr": raftAddr,
 		},
 		StartJoinAddr: agent.StartJoinAddrs,
 	})
@@ -143,7 +171,6 @@ func (agent *Agent) Shutdown() error {
 
 	shutdown := []func() error{
 		agent.membership.Leave,
-		agent.replicator.Close,
 		func() error {
 			agent.server.GracefulStop()
 			return nil

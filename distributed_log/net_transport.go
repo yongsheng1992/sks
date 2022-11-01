@@ -19,7 +19,7 @@ type StreamLayer struct {
 	peerTLSConfig   *tls.Config
 }
 
-func newStreamLayer(ln net.Listener, serverTLSConfig *tls.Config, peerTLSConfig *tls.Config) *StreamLayer {
+func NewStreamLayer(ln net.Listener, serverTLSConfig *tls.Config, peerTLSConfig *tls.Config) *StreamLayer {
 	return &StreamLayer{ln: ln, serverTLSConfig: serverTLSConfig, peerTLSConfig: peerTLSConfig}
 }
 

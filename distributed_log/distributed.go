@@ -139,11 +139,13 @@ func (dl *DistributedLog) Join(id, addr string) error {
 
 	for _, srv := range configFuture.Configuration().Servers {
 		if srv.ID == serverId || srv.Address == serverAddr {
-			return nil
-		}
-		removeFuture := dl.raft.RemoveServer(serverId, 0, 0)
-		if err := removeFuture.Error(); err != nil {
-			return err
+			if srv.ID == serverId && srv.Address == serverAddr {
+				return nil
+			}
+			removeFuture := dl.raft.RemoveServer(serverId, 0, 0)
+			if err := removeFuture.Error(); err != nil {
+				return err
+			}
 		}
 	}
 

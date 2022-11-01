@@ -3,7 +3,6 @@ package discovery
 import (
 	"fmt"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"testing"
 	"time"
 )
@@ -53,7 +52,6 @@ func setupMember(t *testing.T, members []*Membership) ([]*Membership, *handler) 
 		NodeName: fmt.Sprintf("%d", id),
 		BindAddr: addr,
 		Tags:     tags,
-		Logger:   zap.L().Named("membership"),
 	}
 	h := &handler{}
 

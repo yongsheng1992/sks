@@ -11,7 +11,6 @@ type Config struct {
 	BindAddr      string
 	Tags          map[string]string
 	StartJoinAddr []string
-	Logger        *log.Logger
 }
 
 type Membership struct {
@@ -57,7 +56,7 @@ func (m *Membership) setupSerf() error {
 	m.Serf, err = serf.Create(config)
 
 	go m.eventHandler()
-	if m.StartJoinAddr != nil || len(m.StartJoinAddr) != 0 {
+	if m.StartJoinAddr != nil && len(m.StartJoinAddr) != 0 {
 		_, err := m.Serf.Join(m.StartJoinAddr, true)
 		if err != nil {
 			return err
@@ -89,14 +88,15 @@ func (m *Membership) eventHandler() {
 
 func (m *Membership) handleJoin(member serf.Member) {
 	if err := m.Handler.Join(member.Name, member.Tags["rpc_addr"]); err != nil {
-		m.Logger().Printf("[ERROR] membership: handleJoin: %s ", member.Name)
-
+		log.Printf("[ERROR] membership: handleJoin: %s err: %s local: %s", member.Name, err.Error(), m.NodeName)
+	} else {
+		log.Printf("[DEBUG] membership: handleJoin: %s local %s", member.Name, m.NodeName)
 	}
 }
 
 func (m *Membership) handelLeave(member serf.Member) {
 	if err := m.Handler.Leave(member.Name); err != nil {
-		m.Logger().Printf("[ERROR] membership: handleLeave: %s", member.Name)
+		log.Printf("[ERROR] membership: handleLeave: %s err : %s", member.Name, err.Error())
 	}
 }
 
@@ -110,8 +110,4 @@ func (m *Membership) Members() []serf.Member {
 
 func (m *Membership) Leave() error {
 	return m.Serf.Leave()
-}
-
-func (m *Membership) Logger() *log.Logger {
-	return m.Config.Logger
 }

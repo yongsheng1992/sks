@@ -120,6 +120,7 @@ func (agent *Agent) setupServer() error {
 	var err error
 	serverConfig := &server.Config{
 		CommitLog: agent.log,
+		GetServer: agent.log,
 	}
 	var opts []grpc.ServerOption
 

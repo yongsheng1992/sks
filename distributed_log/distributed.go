@@ -209,3 +209,20 @@ func (dl *DistributedLog) apply(reqType RequestType, req proto.Message) (interfa
 func (dl *DistributedLog) Read(offset uint64) (*log_v1.Record, error) {
 	return dl.log.Read(offset)
 }
+
+func (dl *DistributedLog) GetServers() ([]*log_v1.Server, error) {
+	future := dl.raft.GetConfiguration()
+	if err := future.Error(); err != nil {
+		return nil, err
+	}
+	var servers []*log_v1.Server
+
+	for _, srv := range future.Configuration().Servers {
+		servers = append(servers, &log_v1.Server{
+			Id:       string(srv.ID),
+			RpcAddr:  string(srv.Address),
+			IsLeader: srv.Address == dl.raft.Leader(),
+		})
+	}
+	return servers, nil
+}

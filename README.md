@@ -14,29 +14,15 @@
 
 ## Raft
 
-Raft的工作就是保证日志（只能追加写的文件）在大多数副本中保证一致。这里的日志可以看做是RSM的操作记录，通过重新执行日志即可构建状态一致的RSM。
-在实际应用中，需要解决日志执行时间过长和占用存储空间的问题。所以会在指定时间，对当前的RSM做一次快照，快照只是关系状态，远比日志文件要小，这样可以加快RSM的构建，新副本加入集群的时候也会加快。
+使用[etcd-raft](https://github.com/etcd-io/etcd/tree/main/raft)来实现一致性。书上使用的[hashicorp-raft]()，有以下问题： 
+* 无法扩展对ConfChange这里消息的应用。hashicorp的实现中，消息体只有node的地址，没有端口信息。这样应用监听到有node加入/离开到集群，但是无法确定应用的端口。
+书上使用连接复用来解决这个问题。
+* 没有etcd的实现使用广泛
 
-[hashicorp/raft](https://github.com/hashicorp/raft) 创建Raft节点的方法：
-```go
-package raft
+## 计划
 
-func NewRaft(
-	conf *Config, // 配置文件
-	fsm FSM, // 即RSM，需要执行提交后的日志。即commit后的apply
-	logs LogStore, // raft日志保存
-	stable StableStore, // raft node的状态保存。node的状态（follower/candidate/leader)，当前的任期这些数据需要持久化
-	snaps SnapshotStore, // raft 快照保存
-	trans Transport, // raft 通信
-	)(*Raft, error) {
-	//
-	return nil, nil
-}
-```
-
-`FSM`的具体实现比较灵活，它是一个在内存的对象，可以是map、tree等类型的。`FSM`和`SnapshotStore`是强相关的。
-
-# Debug
-
-raft下标是从1开始的。注意`log.Config.InitialOffset`配置。
-
+* [ ] raft集成
+  * [ ] 单节点使用。通过`proposeC`提交消息，通过`commitC`应用消息
+  * [ ] 单节点wal
+  * [ ] 单节点快照
+  * [ ] 多节点使用、wal和快照

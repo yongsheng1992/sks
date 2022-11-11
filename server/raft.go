@@ -6,8 +6,6 @@ import (
 	"github.com/coreos/etcd/raft"
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/rafthttp"
-	"log"
-	"os"
 	"time"
 )
 
@@ -18,37 +16,41 @@ type raftNode struct {
 	shutdownC <-chan struct{}
 	node      raft.Node
 
-	ticker    *time.Ticker
-	transport *rafthttp.Transport
-	storage   *raft.MemoryStorage
-	logger    raft.Logger
+	ticker      *time.Ticker
+	transporter rafthttp.Transporter
+	storage     *raft.MemoryStorage
+	logger      raft.Logger
 }
 
-func NewRaftNode(proposeC <-chan []byte, shutdownC <-chan struct{}) (*raftNode, <-chan []byte) {
+type RaftConfig struct {
+	Id            uint64
+	ElectionTick  int
+	HeartbeatTick int
+	Logger        raft.Logger
+}
+
+func NewRaftNode(config *RaftConfig, peers []raft.Peer, proposeC <-chan []byte, shutdownC <-chan struct{}) (*raftNode, <-chan []byte) {
 	rn := &raftNode{
 		proposeC:  proposeC,
 		shutdownC: shutdownC,
 		ticker:    time.NewTicker(time.Millisecond * 50),
 		commitC:   make(chan []byte),
+		logger:    config.Logger,
+		storage:   raft.NewMemoryStorage(),
 	}
-	rn.storage = raft.NewMemoryStorage()
-	defaultLogger := &raft.DefaultLogger{Logger: log.New(os.Stderr, "raft", log.LstdFlags)}
-	defaultLogger.EnableDebug()
-	logger := raft.Logger(defaultLogger)
+
 	raftConfig := raft.Config{
-		ID:              0x01,
-		ElectionTick:    10,
-		HeartbeatTick:   1,
+		ID:              config.Id,
+		ElectionTick:    config.ElectionTick,
+		HeartbeatTick:   config.HeartbeatTick,
 		Storage:         rn.storage,
 		MaxSizePerMsg:   4096,
 		MaxInflightMsgs: 256,
-		Logger:          logger,
+		Logger:          config.Logger,
 	}
-	peers := []raft.Peer{{ID: 0x01}}
 
-	rn.logger = logger
-	rn.transport = &rafthttp.Transport{
-		ID:        types.ID(1),
+	rn.transporter = &rafthttp.Transport{
+		ID:        types.ID(config.Id),
 		ClusterID: 0x1000,
 		Raft:      rn,
 		ErrorC:    make(chan error),
@@ -95,7 +97,7 @@ func (rn *raftNode) run() {
 					}
 				}
 			}
-			rn.transport.Send(rd.Messages)
+			rn.transporter.Send(rd.Messages)
 			rn.node.Advance()
 		case <-rn.shutdownC:
 			return

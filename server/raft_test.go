@@ -68,9 +68,11 @@ func TestSingleNode(t *testing.T) {
 				if !ok {
 					return
 				}
-				require.Equal(t, string(data), msgs[i])
-				commits = append(commits, string(data))
-				i++
+				for _, item := range data {
+					require.Equal(t, string(item), msgs[i])
+					commits = append(commits, string(item))
+					i++
+				}
 			}
 		}
 	}()

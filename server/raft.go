@@ -17,8 +17,10 @@ import (
 type raftNode struct {
 	config   *RaftConfig
 	proposeC <-chan []byte
-	commitC  chan []byte
+	commitC  chan [][]byte
 	stopC    chan struct{}
+
+	lastApplied uint64
 
 	shutdownC <-chan struct{}
 	node      raft.Node
@@ -43,7 +45,7 @@ type RaftConfig struct {
 	Join          bool
 }
 
-func NewRaftNode(config *RaftConfig, peers []raft.Peer, proposeC <-chan []byte, shutdownC <-chan struct{}) (*raftNode, <-chan []byte) {
+func NewRaftNode(config *RaftConfig, peers []raft.Peer, proposeC <-chan []byte, shutdownC <-chan struct{}) (*raftNode, <-chan [][]byte) {
 	if !fileutil.Exist(config.SnapDir) {
 		if err := os.Mkdir(config.SnapDir, 0750); err != nil {
 			config.Logger.Fatalf("create snap dir failed %v", err)
@@ -55,7 +57,7 @@ func NewRaftNode(config *RaftConfig, peers []raft.Peer, proposeC <-chan []byte, 
 		proposeC:    proposeC,
 		shutdownC:   shutdownC,
 		ticker:      time.NewTicker(time.Millisecond * 50),
-		commitC:     make(chan []byte),
+		commitC:     make(chan [][]byte),
 		logger:      config.Logger,
 		raftStorage: raft.NewMemoryStorage(),
 		stopC:       make(chan struct{}),
@@ -128,6 +130,7 @@ func (rn *raftNode) run() {
 					rn.logger.Error(err)
 				}
 			}
+			commitData := make([][]byte, 0)
 			for _, entry := range rd.CommittedEntries {
 				if entry.Type == raftpb.EntryConfChange {
 					var cc raftpb.ConfChange
@@ -138,9 +141,12 @@ func (rn *raftNode) run() {
 				} else {
 					rn.logger.Debug(entry.Type, entry.Data)
 					if len(entry.Data) > 0 {
-						rn.commitC <- entry.Data
+						commitData = append(commitData, entry.Data)
 					}
 				}
+			}
+			if len(commitData) > 0 {
+				rn.commitC <- commitData
 			}
 			rn.transporter.Send(rd.Messages)
 			rn.node.Advance()

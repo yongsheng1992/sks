@@ -71,8 +71,8 @@ func (store *kvstore) Put(key string, val string) error {
 	if err := gob.NewEncoder(&buf).Encode(cmd); err != nil {
 		return err
 	}
-	store.proposeC <- buf.Bytes()
 	ch := store.wait.Register(cmd.ID)
+	store.proposeC <- buf.Bytes()
 	<-ch
 	return nil
 }

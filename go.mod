@@ -11,8 +11,8 @@ replace (
 require (
 	github.com/coreos/etcd v3.3.27+incompatible
 	github.com/stretchr/testify v1.8.1
+	go.uber.org/zap v1.23.0
 	google.golang.org/grpc v1.33.1
-	google.golang.org/protobuf v1.28.1
 )
 
 require (
@@ -34,11 +34,11 @@ require (
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
-	go.uber.org/zap v1.23.0 // indirect
 	golang.org/x/net v0.0.0-20211123203042-d83791d6bcd9 // indirect
 	golang.org/x/sys v0.0.0-20220728004956-3c1f35247d10 // indirect
 	golang.org/x/time v0.2.0 // indirect
 	google.golang.org/genproto v0.0.0-20200513103714-09dca8ec2884 // indirect
+	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

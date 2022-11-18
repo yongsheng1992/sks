@@ -24,21 +24,26 @@ type kvstore struct {
 	kvStore     map[string]string
 	snapshotter *snap.Snapshotter
 
-	wait wait.Wait
-
+	wait   wait.Wait
+	ticker *time.Ticker
 	logger *zap.Logger
+
+	config *KVConfig
 }
 
 type KVConfig struct {
 	logger *zap.Logger
+	ticks  time.Duration
 }
 
-func newKVStore(config KVConfig, proposeC chan<- []byte, commitC <-chan [][]byte) *kvstore {
+func newKVStore(config *KVConfig, proposeC chan<- []byte, commitC <-chan [][]byte) *kvstore {
 	store := &kvstore{
 		proposeC: proposeC,
 		kvStore:  map[string]string{},
 		wait:     wait.New(),
 		logger:   config.logger,
+		ticker:   time.NewTicker(config.ticks),
+		config:   config,
 	}
 	go store.apply(commitC)
 	return store
@@ -71,10 +76,17 @@ func (store *kvstore) Put(key string, val string) error {
 	if err := gob.NewEncoder(&buf).Encode(cmd); err != nil {
 		return err
 	}
+	store.ticker.Reset(store.config.ticks)
 	ch := store.wait.Register(cmd.ID)
 	store.proposeC <- buf.Bytes()
-	<-ch
-	return nil
+	for {
+		select {
+		case <-ch:
+			return nil
+		case <-store.ticker.C:
+			store.logger.Warn("wait trigger timeout", zap.Uint64("request_id", cmd.ID))
+		}
+	}
 }
 
 func (store *kvstore) apply(commitC <-chan [][]byte) {
@@ -91,8 +103,8 @@ func (store *kvstore) apply(commitC <-chan [][]byte) {
 			for _, item := range data {
 				cmd := Command{}
 				if err := gob.NewDecoder(bytes.NewReader(item)).Decode(&cmd); err != nil {
+					store.logger.Error("decode data error")
 				}
-				store.logger.Debug(fmt.Sprintf("receive cmd %v", cmd))
 				switch cmd.Op {
 				case Put:
 					store.mux.Lock()
@@ -107,6 +119,18 @@ func (store *kvstore) apply(commitC <-chan [][]byte) {
 			}
 		}
 	}
+}
+
+// getSnapshot create snapshot at this point.
+func (store *kvstore) getSnapshot() ([]byte, error) {
+	store.mux.Lock()
+	defer store.mux.Unlock()
+
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(store.kvStore); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (store *kvstore) requestID() uint64 {

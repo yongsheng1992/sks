@@ -5,6 +5,7 @@ import (
 	"go.uber.org/zap"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestKVStore(t *testing.T) {
@@ -13,7 +14,7 @@ func TestKVStore(t *testing.T) {
 	config := KVConfig{
 		logger: zap.NewExample(),
 	}
-	kv := newKVStore(config, proposeC, commitC)
+	kv := newKVStore(&config, proposeC, commitC)
 
 	go func() {
 		for {
@@ -41,11 +42,12 @@ func BenchmarkKvstore_Put(b *testing.B) {
 	logger, _ := zap.NewProduction()
 	config := KVConfig{
 		logger: logger,
+		ticks:  time.Millisecond * 20,
 	}
 	proposeC := make(chan []byte)
 	commitC := make(chan [][]byte)
 
-	kv := newKVStore(config, proposeC, commitC)
+	kv := newKVStore(&config, proposeC, commitC)
 
 	go func() {
 		for {

@@ -10,20 +10,29 @@ import (
 	"github.com/coreos/etcd/snap"
 	"github.com/coreos/etcd/wal"
 	"github.com/coreos/etcd/wal/walpb"
+	"go.uber.org/zap"
 	"os"
 	"time"
 )
 
+type commit struct {
+	data       [][]byte
+	applyDoneC chan struct{}
+}
+
 type raftNode struct {
 	config   *RaftConfig
 	proposeC <-chan []byte
-	commitC  chan [][]byte
+	commitC  chan *commit
 	stopC    chan struct{}
 
-	lastApplied uint64
+	appliedIndex  uint64
+	snapshotIndex uint64
+	snapCount     uint64
 
 	shutdownC <-chan struct{}
 	node      raft.Node
+	confState *raftpb.ConfState
 
 	ticker      *time.Ticker
 	transporter rafthttp.Transporter
@@ -31,8 +40,8 @@ type raftNode struct {
 
 	wal         *wal.WAL
 	snapshotter *snap.Snapshotter
-
-	logger raft.Logger
+	getSnapshot func() ([]byte, error)
+	logger      raft.Logger
 }
 
 type RaftConfig struct {
@@ -43,9 +52,15 @@ type RaftConfig struct {
 	WalDir        string
 	SnapDir       string
 	Join          bool
+	getSnapshot   func() ([]byte, error)
 }
 
-func NewRaftNode(config *RaftConfig, peers []raft.Peer, proposeC <-chan []byte, shutdownC <-chan struct{}) (*raftNode, <-chan [][]byte) {
+const (
+	snapCount      = 10000
+	catchUpEntries = 10000
+)
+
+func NewRaftNode(config *RaftConfig, peers []raft.Peer, proposeC <-chan []byte, shutdownC <-chan struct{}) (*raftNode, <-chan *commit) {
 	if !fileutil.Exist(config.SnapDir) {
 		if err := os.Mkdir(config.SnapDir, 0750); err != nil {
 			config.Logger.Fatalf("create snap dir failed %v", err)
@@ -57,11 +72,14 @@ func NewRaftNode(config *RaftConfig, peers []raft.Peer, proposeC <-chan []byte, 
 		proposeC:    proposeC,
 		shutdownC:   shutdownC,
 		ticker:      time.NewTicker(time.Millisecond * 50),
-		commitC:     make(chan [][]byte),
+		commitC:     make(chan *commit),
 		logger:      config.Logger,
 		raftStorage: raft.NewMemoryStorage(),
 		stopC:       make(chan struct{}),
+		snapCount:   snapCount,
+		getSnapshot: config.getSnapshot,
 	}
+
 	rn.snapshotter = snap.New(rn.config.SnapDir)
 	rn.wal = rn.replayWal()
 	raftConfig := raft.Config{
@@ -137,7 +155,17 @@ func (rn *raftNode) run() {
 					if err := cc.Unmarshal(entry.Data); err != nil {
 						rn.logger.Error(err)
 					}
-					rn.node.ApplyConfChange(cc)
+					rn.confState = rn.node.ApplyConfChange(cc)
+
+					switch cc.Type {
+					case raftpb.ConfChangeAddNode:
+						if len(cc.Context) > 0 {
+							rn.transporter.AddPeer(types.ID(cc.ID), []string{string(cc.Context)})
+						}
+					case raftpb.ConfChangeRemoveNode:
+						// todo handle itself
+						rn.transporter.RemovePeer(types.ID(cc.ID))
+					}
 				} else {
 					rn.logger.Debug(entry.Type, entry.Data)
 					if len(entry.Data) > 0 {
@@ -146,7 +174,8 @@ func (rn *raftNode) run() {
 				}
 			}
 			if len(commitData) > 0 {
-				rn.commitC <- commitData
+				rn.applyCommittedData(commitData)
+				rn.appliedIndex = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
 			}
 			rn.transporter.Send(rd.Messages)
 			rn.node.Advance()
@@ -157,6 +186,62 @@ func (rn *raftNode) run() {
 			return
 		}
 	}
+}
+
+func (rn *raftNode) applyCommittedData(data [][]byte) {
+	applyDoneC := make(chan struct{})
+	commit := &commit{
+		data:       data,
+		applyDoneC: applyDoneC,
+	}
+	rn.commitC <- commit
+}
+
+func (rn *raftNode) maybeTriggerSnapshot(applyDoneC <-chan struct{}) {
+	if rn.appliedIndex-rn.snapshotIndex < rn.snapCount {
+		return
+	}
+
+	if applyDoneC != nil {
+		select {
+		case <-applyDoneC:
+		}
+	}
+
+	// todo handle err
+	snapData, err := rn.getSnapshot()
+	if err != nil {
+		rn.logger.Error("getSnapshot err", zap.Error(err))
+	}
+
+	snapshot, err := rn.raftStorage.CreateSnapshot(rn.appliedIndex, rn.confState, snapData)
+	if err != nil {
+		rn.logger.Error("storage create snapshot err", zap.Error(err))
+	}
+
+	if err := rn.snapshotter.SaveSnap(snapshot); err != nil {
+		rn.logger.Error("snapshotter save snapshot err", zap.Error(err))
+	}
+	walSnapshot := walpb.Snapshot{
+		Index: snapshot.Metadata.Index,
+		Term:  snapshot.Metadata.Term,
+	}
+
+	if err := rn.wal.SaveSnapshot(walSnapshot); err != nil {
+		rn.logger.Error("wal save snapshot err", zap.Error(err))
+	}
+
+	compactIndex := uint64(1)
+
+	if rn.appliedIndex > catchUpEntries {
+		compactIndex = rn.appliedIndex - catchUpEntries
+	}
+
+	if err := rn.raftStorage.Compact(compactIndex); err != nil {
+		rn.logger.Error("compat log err", zap.Error(err))
+	}
+
+	rn.snapshotIndex = rn.appliedIndex
 }
 
 func (rn *raftNode) Process(ctx context.Context, m raftpb.Message) error {
@@ -211,6 +296,11 @@ func (rn *raftNode) replayWal() *wal.WAL {
 		rn.logger.Fatalf("failed to set hard state %v", err)
 	}
 	rn.logger.Infof("set hard state %v", state)
+
+	rn.appliedIndex = snapshot.Metadata.Index
+	rn.snapshotIndex = snapshot.Metadata.Index
+	rn.confState = &snapshot.Metadata.ConfState
+
 	return w
 }
 

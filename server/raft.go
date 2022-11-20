@@ -178,7 +178,13 @@ func (rn *raftNode) run() {
 				rn.applyCommittedData(commitData)
 				rn.appliedIndex = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
 			}
-			rn.transporter.Send(rd.Messages)
+
+			// the leader can write to its disk in parallel with replicating to the followers and them
+			// writing to their disks.
+			// For more details, check raft thesis 10.2.1
+			if rd.RaftState == raft.StateLeader {
+				rn.transporter.Send(rd.Messages)
+			}
 			rn.node.Advance()
 		case <-rn.shutdownC:
 			rn.logger.Infof("receive shutdown...")

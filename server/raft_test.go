@@ -14,8 +14,12 @@ import (
 func TestSingleNode(t *testing.T) {
 	defer func() {
 		fmt.Println("remove all")
-		_ = os.RemoveAll("./wal")
-		_ = os.RemoveAll("./snap")
+		if err := os.RemoveAll("./wal"); err != nil {
+			fmt.Println(err)
+		}
+		if err := os.RemoveAll("./snap"); err != nil {
+			fmt.Println(err)
+		}
 	}()
 	proposeC := make(chan []byte)
 	shutdownC := make(chan struct{})
@@ -64,14 +68,20 @@ func TestSingleNode(t *testing.T) {
 		i := 0
 		for {
 			select {
-			case data, ok := <-commitC:
+			case commit, ok := <-commitC:
+				rn.logger.Debug(fmt.Sprintf("commit %v", commit))
 				if !ok {
 					return
 				}
-				for _, item := range data {
+				for _, item := range commit.data {
 					require.Equal(t, string(item), msgs[i])
 					commits = append(commits, string(item))
 					i++
+				}
+				if commit.applyDoneC != nil {
+					rn.logger.Debug("apply done notify")
+					commit.applyDoneC <- struct{}{}
+					rn.logger.Debug("apply done complete")
 				}
 			}
 		}
@@ -95,4 +105,6 @@ func TestSingleNode(t *testing.T) {
 		}
 	}
 	require.Equal(t, commits, commits1)
+	err = rn.wal.Close()
+	require.NoError(t, err)
 }

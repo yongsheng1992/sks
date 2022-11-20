@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"github.com/coreos/etcd/pkg/fileutil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/raft"
@@ -183,6 +184,9 @@ func (rn *raftNode) run() {
 			rn.logger.Infof("receive shutdown...")
 			close(rn.commitC)
 			rn.node.Stop()
+			if err := rn.wal.Close(); err != nil {
+				rn.logger.Error(err)
+			}
 			return
 		}
 	}
@@ -194,7 +198,13 @@ func (rn *raftNode) applyCommittedData(data [][]byte) {
 		data:       data,
 		applyDoneC: applyDoneC,
 	}
+	rn.logger.Debug(fmt.Sprintf("apply commit %v", data))
 	rn.commitC <- commit
+
+	select {
+	case <-applyDoneC:
+		rn.logger.Debug("apply done")
+	}
 }
 
 func (rn *raftNode) maybeTriggerSnapshot(applyDoneC <-chan struct{}) {
@@ -297,9 +307,11 @@ func (rn *raftNode) replayWal() *wal.WAL {
 	}
 	rn.logger.Infof("set hard state %v", state)
 
-	rn.appliedIndex = snapshot.Metadata.Index
-	rn.snapshotIndex = snapshot.Metadata.Index
-	rn.confState = &snapshot.Metadata.ConfState
+	if snapshot != nil {
+		rn.appliedIndex = snapshot.Metadata.Index
+		rn.snapshotIndex = snapshot.Metadata.Index
+		rn.confState = &snapshot.Metadata.ConfState
+	}
 
 	return w
 }

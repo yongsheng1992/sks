@@ -3,17 +3,32 @@ package server
 import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
 )
 
+var letters = []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+func randStr(n int) string {
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
 func TestKVStore(t *testing.T) {
 	proposeC := make(chan []byte)
 	commitC := make(chan [][]byte)
+	logger, _ := zap.NewProduction()
 	config := KVConfig{
-		logger: zap.NewExample(),
+		logger: logger,
+		ticks:  time.Millisecond * 10,
 	}
+	m := make(map[string]string)
+
 	kv := newKVStore(&config, proposeC, commitC)
 
 	go func() {
@@ -29,13 +44,25 @@ func TestKVStore(t *testing.T) {
 	}()
 
 	for i := 0; i < 10000; i++ {
-		err := kv.Put("foo", "bar")
+		key := randStr(i % 26)
+		value := randStr(i % 26)
+		m[key] = value
+		err := kv.Put(key, value)
 		require.NoError(t, err)
 	}
 
-	val, exist := kv.Get("foo")
-	require.True(t, exist)
-	require.Equal(t, "bar", val)
+	snapshot, err := kv.getSnapshot()
+	require.NoError(t, err)
+
+	newKv := newKVStore(&config, proposeC, commitC)
+	err = newKv.loadSnapshot(snapshot)
+	require.NoError(t, err)
+
+	for key, value := range m {
+		val, exist := kv.Get(key)
+		require.True(t, exist)
+		require.Equal(t, value, val)
+	}
 }
 
 func BenchmarkKvstore_Put(b *testing.B) {

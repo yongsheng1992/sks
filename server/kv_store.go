@@ -133,6 +133,20 @@ func (store *kvstore) getSnapshot() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+func (store *kvstore) loadSnapshot(snapshot []byte) error {
+	store.mux.Lock()
+	defer store.mux.Unlock()
+
+	kv := make(map[string]string)
+
+	if err := gob.NewDecoder(bytes.NewReader(snapshot)).Decode(&kv); err != nil {
+		return err
+	}
+
+	store.kvStore = kv
+	return nil
+}
+
 func (store *kvstore) requestID() uint64 {
 	rand.Seed(time.Now().UnixNano())
 	return rand.Uint64()

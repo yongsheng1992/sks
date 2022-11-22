@@ -174,17 +174,19 @@ func (rn *raftNode) run() {
 					}
 				}
 			}
+			var applyDoneC <-chan struct{}
 			if len(commitData) > 0 {
-				rn.applyCommittedData(commitData)
+				applyDoneC = rn.applyCommittedData(commitData)
 				rn.appliedIndex = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
 			}
 
 			// the leader can write to its disk in parallel with replicating to the followers and them
 			// writing to their disks.
 			// For more details, check raft thesis 10.2.1
-			if rd.RaftState == raft.StateLeader {
+			if rd.SoftState != nil && rd.SoftState.RaftState == raft.StateLeader {
 				rn.transporter.Send(rd.Messages)
 			}
+			rn.maybeTriggerSnapshot(applyDoneC)
 			rn.node.Advance()
 		case <-rn.shutdownC:
 			rn.logger.Infof("receive shutdown...")
@@ -198,7 +200,7 @@ func (rn *raftNode) run() {
 	}
 }
 
-func (rn *raftNode) applyCommittedData(data [][]byte) {
+func (rn *raftNode) applyCommittedData(data [][]byte) <-chan struct{} {
 	applyDoneC := make(chan struct{})
 	commit := &commit{
 		data:       data,
@@ -207,10 +209,7 @@ func (rn *raftNode) applyCommittedData(data [][]byte) {
 	rn.logger.Debug(fmt.Sprintf("apply commit %v", data))
 	rn.commitC <- commit
 
-	select {
-	case <-applyDoneC:
-		rn.logger.Debug("apply done")
-	}
+	return applyDoneC
 }
 
 func (rn *raftNode) maybeTriggerSnapshot(applyDoneC <-chan struct{}) {
@@ -219,6 +218,7 @@ func (rn *raftNode) maybeTriggerSnapshot(applyDoneC <-chan struct{}) {
 	}
 
 	if applyDoneC != nil {
+		rn.logger.Debug("select applyDoneC...")
 		select {
 		case <-applyDoneC:
 		}

@@ -79,9 +79,7 @@ func TestSingleNode(t *testing.T) {
 					i++
 				}
 				if commit.applyDoneC != nil {
-					rn.logger.Debug("apply done notify")
-					commit.applyDoneC <- struct{}{}
-					rn.logger.Debug("apply done complete")
+					close(commit.applyDoneC)
 				}
 			}
 		}

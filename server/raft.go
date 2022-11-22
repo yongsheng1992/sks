@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"github.com/coreos/etcd/pkg/fileutil"
 	"github.com/coreos/etcd/pkg/types"
 	"github.com/coreos/etcd/raft"
@@ -27,9 +26,10 @@ type raftNode struct {
 	commitC  chan *commit
 	stopC    chan struct{}
 
-	appliedIndex  uint64
-	snapshotIndex uint64
-	snapCount     uint64
+	appliedIndex   uint64
+	snapshotIndex  uint64
+	snapCount      uint64
+	catchUpEntries uint64
 
 	shutdownC <-chan struct{}
 	node      raft.Node
@@ -46,14 +46,16 @@ type raftNode struct {
 }
 
 type RaftConfig struct {
-	Id            uint64
-	ElectionTick  int
-	HeartbeatTick int
-	Logger        raft.Logger
-	WalDir        string
-	SnapDir       string
-	Join          bool
-	getSnapshot   func() ([]byte, error)
+	Id             uint64
+	ElectionTick   int
+	HeartbeatTick  int
+	Logger         raft.Logger
+	WalDir         string
+	SnapDir        string
+	Join           bool
+	GetSnapshot    func() ([]byte, error)
+	SnapCount      uint64
+	CatchupEntries uint64
 }
 
 const (
@@ -69,20 +71,30 @@ func NewRaftNode(config *RaftConfig, peers []raft.Peer, proposeC <-chan []byte, 
 	}
 	hasOldWal := wal.Exist(config.WalDir)
 	rn := &raftNode{
-		config:      config,
-		proposeC:    proposeC,
-		shutdownC:   shutdownC,
-		ticker:      time.NewTicker(time.Millisecond * 50),
-		commitC:     make(chan *commit),
-		logger:      config.Logger,
-		raftStorage: raft.NewMemoryStorage(),
-		stopC:       make(chan struct{}),
-		snapCount:   snapCount,
-		getSnapshot: config.getSnapshot,
+		config:         config,
+		proposeC:       proposeC,
+		shutdownC:      shutdownC,
+		ticker:         time.NewTicker(time.Millisecond * 50),
+		commitC:        make(chan *commit),
+		logger:         config.Logger,
+		raftStorage:    raft.NewMemoryStorage(),
+		stopC:          make(chan struct{}),
+		snapCount:      config.SnapCount,
+		catchUpEntries: config.CatchupEntries,
+		getSnapshot:    config.GetSnapshot,
+	}
+
+	if rn.snapCount == 0 {
+		rn.snapCount = snapCount
+	}
+
+	if rn.catchUpEntries == 0 {
+		rn.catchUpEntries = catchUpEntries
 	}
 
 	rn.snapshotter = snap.New(rn.config.SnapDir)
 	rn.wal = rn.replayWal()
+
 	raftConfig := raft.Config{
 		ID:              config.Id,
 		ElectionTick:    config.ElectionTick,
@@ -206,7 +218,7 @@ func (rn *raftNode) applyCommittedData(data [][]byte) <-chan struct{} {
 		data:       data,
 		applyDoneC: applyDoneC,
 	}
-	rn.logger.Debug(fmt.Sprintf("apply commit %v", data))
+	//rn.logger.Debug(fmt.Sprintf("apply commit %v", data))
 	rn.commitC <- commit
 
 	return applyDoneC
@@ -249,8 +261,8 @@ func (rn *raftNode) maybeTriggerSnapshot(applyDoneC <-chan struct{}) {
 
 	compactIndex := uint64(1)
 
-	if rn.appliedIndex > catchUpEntries {
-		compactIndex = rn.appliedIndex - catchUpEntries
+	if rn.appliedIndex > rn.catchUpEntries {
+		compactIndex = rn.appliedIndex - rn.catchUpEntries
 	}
 
 	if err := rn.raftStorage.Compact(compactIndex); err != nil {
@@ -294,7 +306,7 @@ func (rn *raftNode) loadSnapshot() *raftpb.Snapshot {
 		}
 		return s
 	}
-	return &raftpb.Snapshot{}
+	return nil
 }
 
 func (rn *raftNode) replayWal() *wal.WAL {
@@ -304,19 +316,24 @@ func (rn *raftNode) replayWal() *wal.WAL {
 	if err != nil {
 		rn.logger.Fatalf("failed to read wal %v", err)
 	}
-	if err := rn.raftStorage.Append(entries); err != nil {
-		rn.logger.Fatalf("failed to append entries %v", err)
-	}
-	rn.logger.Infof("append %d entries.", len(entries))
-	if err := rn.raftStorage.SetHardState(state); err != nil {
-		rn.logger.Fatalf("failed to set hard state %v", err)
-	}
-	rn.logger.Infof("set hard state %v", state)
 
 	if snapshot != nil {
+		if err = rn.raftStorage.ApplySnapshot(*snapshot); err != nil {
+			rn.logger.Fatalf("failed to apply snapshot: %v", err)
+		}
+		// todo mv to run
 		rn.appliedIndex = snapshot.Metadata.Index
 		rn.snapshotIndex = snapshot.Metadata.Index
 		rn.confState = &snapshot.Metadata.ConfState
+	}
+
+	rn.logger.Infof("append %d entries.", len(entries))
+	if err := rn.raftStorage.Append(entries); err != nil {
+		rn.logger.Fatalf("failed to append entries %v", err)
+	}
+	rn.logger.Infof("set hard state %v", state)
+	if err := rn.raftStorage.SetHardState(state); err != nil {
+		rn.logger.Fatalf("failed to set hard state %v", err)
 	}
 
 	return w

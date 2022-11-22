@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"github.com/coreos/etcd/raft"
-	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/stretchr/testify/require"
 	"log"
+	"math/rand"
 	"os"
 	"testing"
 	"time"
@@ -23,18 +25,26 @@ func TestSingleNode(t *testing.T) {
 	}()
 	proposeC := make(chan []byte)
 	shutdownC := make(chan struct{})
+	commits := make([]string, 0)
 
 	defaultLogger := &raft.DefaultLogger{Logger: log.New(os.Stderr, "raft", log.LstdFlags)}
 	defaultLogger.EnableDebug()
 	logger := raft.Logger(defaultLogger)
 
 	config := RaftConfig{
-		Id:            1,
-		ElectionTick:  10,
-		HeartbeatTick: 1,
-		Logger:        logger,
-		WalDir:        "./wal",
-		SnapDir:       "./snap",
+		Id:             1,
+		ElectionTick:   10,
+		HeartbeatTick:  1,
+		Logger:         logger,
+		WalDir:         "./wal",
+		SnapDir:        "./snap",
+		SnapCount:      10,
+		CatchupEntries: 10,
+		GetSnapshot: func() ([]byte, error) {
+			var buf bytes.Buffer
+			err := gob.NewEncoder(&buf).Encode(commits)
+			return buf.Bytes(), err
+		},
 	}
 
 	rn, commitC := NewRaftNode(&config, []raft.Peer{{ID: config.Id}}, proposeC, shutdownC)
@@ -54,16 +64,23 @@ func TestSingleNode(t *testing.T) {
 			time.Sleep(time.Second * 1)
 		}
 	}
-	msgs := []string{
-		"hello",
-		"world",
-	}
 
-	for _, msg := range msgs {
-		proposeC <- []byte(msg)
+	msgs := make([]string, 0)
+
+	for i := 0; i < 1001; i++ {
+		msgs = append(msgs, randStr(i%26+1))
 	}
-	ticker := time.Tick(time.Second * 3)
-	commits := make([]string, 0)
+	//msgs = append(msgs, "hello", "world")
+
+	waitC := make(chan struct{})
+	go func() {
+		for _, msg := range msgs {
+			time.Sleep(time.Microsecond * time.Duration(rand.Intn(100)*1000))
+			proposeC <- []byte(msg)
+		}
+		waitC <- struct{}{}
+	}()
+
 	go func() {
 		i := 0
 		for {
@@ -74,7 +91,7 @@ func TestSingleNode(t *testing.T) {
 					return
 				}
 				for _, item := range commit.data {
-					require.Equal(t, string(item), msgs[i])
+					require.Equal(t, msgs[i], string(item))
 					commits = append(commits, string(item))
 					i++
 				}
@@ -84,25 +101,21 @@ func TestSingleNode(t *testing.T) {
 			}
 		}
 	}()
+	<-waitC
+	ticker := time.Tick(time.Second * 3)
 	<-ticker
 	shutdownC <- struct{}{}
 	<-rn.Stop()
-
+	appliedIndex := rn.snapshotIndex
 	rn, commitC = NewRaftNode(&config, []raft.Peer{{ID: config.Id}}, proposeC, shutdownC)
 	first, err := rn.raftStorage.FirstIndex()
 	require.NoError(t, err)
 	last, err := rn.raftStorage.LastIndex()
 	require.NoError(t, err)
-	entries, err := rn.raftStorage.Entries(first, last+1, 4096)
+	rn.logger.Debugf("[%d: %d]", first, last)
 	require.NoError(t, err)
-	commits1 := make([]string, 0)
-	for _, entry := range entries {
-		fmt.Println(entry.Type)
-		if entry.Type == raftpb.EntryNormal && len(entry.Data) > 0 {
-			commits1 = append(commits1, string(entry.Data))
-		}
-	}
-	require.Equal(t, commits, commits1)
+
+	require.Equal(t, appliedIndex, rn.appliedIndex)
 	err = rn.wal.Close()
 	require.NoError(t, err)
 }

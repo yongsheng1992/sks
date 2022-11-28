@@ -45,6 +45,7 @@ func newKVStore(config *KVConfig, proposeC chan<- []byte, commitC <-chan *commit
 		ticker:   time.NewTicker(config.ticks),
 		config:   config,
 	}
+	//store.apply(commitC)
 	go store.apply(commitC)
 	return store
 }
@@ -96,7 +97,7 @@ func (store *kvstore) apply(commitC <-chan *commit) {
 			data := commit.data
 			applyDoneC := commit.applyDoneC
 
-			store.logger.Debug("receive commit log...", zap.Uint("len", uint(len(data))))
+			store.logger.Info("receive commit log...", zap.Uint("len", uint(len(data))))
 			if !ok {
 				return
 			}
@@ -118,10 +119,10 @@ func (store *kvstore) apply(commitC <-chan *commit) {
 					delete(store.kvStore, cmd.Key)
 					store.mux.Unlock()
 				}
-				if applyDoneC != nil {
-					close(applyDoneC)
-				}
 				store.wait.Trigger(cmd.ID, struct{}{})
+			}
+			if applyDoneC != nil {
+				close(applyDoneC)
 			}
 		}
 	}

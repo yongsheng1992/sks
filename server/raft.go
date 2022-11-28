@@ -186,11 +186,8 @@ func (rn *raftNode) run() {
 					}
 				}
 			}
-			var applyDoneC <-chan struct{}
-			if len(commitData) > 0 {
-				applyDoneC = rn.applyCommittedData(commitData)
-				rn.appliedIndex = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
-			}
+			applyDoneC := rn.applyCommittedData(commitData)
+			rn.appliedIndex = rd.CommittedEntries[len(rd.CommittedEntries)-1].Index
 
 			// the leader can write to its disk in parallel with replicating to the followers and them
 			// writing to their disks.
@@ -213,6 +210,9 @@ func (rn *raftNode) run() {
 }
 
 func (rn *raftNode) applyCommittedData(data [][]byte) <-chan struct{} {
+	if len(data) == 0 {
+		return nil
+	}
 	applyDoneC := make(chan struct{})
 	commit := &commit{
 		data:       data,

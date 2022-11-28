@@ -21,7 +21,7 @@ func randStr(n int) string {
 
 func TestKVStore(t *testing.T) {
 	proposeC := make(chan []byte)
-	commitC := make(chan [][]byte)
+	commitC := make(chan *commit)
 	logger, _ := zap.NewProduction()
 	config := KVConfig{
 		logger: logger,
@@ -38,7 +38,10 @@ func TestKVStore(t *testing.T) {
 				if !ok {
 					return
 				}
-				commitC <- [][]byte{prop}
+				commitC <- &commit{
+					data:       [][]byte{prop},
+					applyDoneC: make(chan struct{}),
+				}
 			}
 		}
 	}()
@@ -72,7 +75,7 @@ func BenchmarkKvstore_Put(b *testing.B) {
 		ticks:  time.Millisecond * 20,
 	}
 	proposeC := make(chan []byte)
-	commitC := make(chan [][]byte)
+	commitC := make(chan *commit)
 
 	kv := newKVStore(&config, proposeC, commitC)
 
@@ -83,7 +86,9 @@ func BenchmarkKvstore_Put(b *testing.B) {
 				if !ok {
 					return
 				}
-				commitC <- [][]byte{prop}
+				commitC <- &commit{
+					data: [][]byte{prop},
+				}
 			}
 		}
 	}()

@@ -36,7 +36,7 @@ type KVConfig struct {
 	ticks  time.Duration
 }
 
-func newKVStore(config *KVConfig, proposeC chan<- []byte, commitC <-chan [][]byte) *kvstore {
+func newKVStore(config *KVConfig, proposeC chan<- []byte, commitC <-chan *commit) *kvstore {
 	store := &kvstore{
 		proposeC: proposeC,
 		kvStore:  map[string]string{},
@@ -89,10 +89,13 @@ func (store *kvstore) Put(key string, val string) error {
 	}
 }
 
-func (store *kvstore) apply(commitC <-chan [][]byte) {
+func (store *kvstore) apply(commitC <-chan *commit) {
 	for {
 		select {
-		case data, ok := <-commitC:
+		case commit, ok := <-commitC:
+			data := commit.data
+			applyDoneC := commit.applyDoneC
+
 			store.logger.Debug("receive commit log...", zap.Uint("len", uint(len(data))))
 			if !ok {
 				return
@@ -114,6 +117,9 @@ func (store *kvstore) apply(commitC <-chan [][]byte) {
 					store.mux.Lock()
 					delete(store.kvStore, cmd.Key)
 					store.mux.Unlock()
+				}
+				if applyDoneC != nil {
+					close(applyDoneC)
 				}
 				store.wait.Trigger(cmd.ID, struct{}{})
 			}
